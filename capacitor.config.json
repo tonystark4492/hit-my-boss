@@ -1,0 +1,14 @@
+{
+  "appId": "com.tonystark4492.hitmyboss",
+  "appName": "HIT MY BOSS",
+  "webDir": "dist",
+  "android": {
+    "backgroundColor": "#16141a",
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 0
+    }
+  }
+}
