@@ -1,0 +1,91 @@
+# Builds the Android APK on GitHub's servers every time you upload changes.
+# Download it from the "Releases" section of your repository (works on your phone).
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to publish the APK as a Release
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install libraries
+        run: npm ci
+
+      - name: Build the game
+        run: npm run build
+
+      - name: Create Android project
+        run: npx cap add android
+
+      - name: App icon and splash screen
+        run: npx @capacitor/assets generate --android --iconBackgroundColor '#16141a' --iconBackgroundColorDark '#16141a' --splashBackgroundColor '#16141a' --splashBackgroundColorDark '#16141a'
+
+      - name: Load signing key (from repository secrets)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+            echo "BUILD_TASK=assembleRelease" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret - building a debug APK. Updates may need you to uninstall the old version first."
+            echo "BUILD_TASK=assembleDebug" >> "$GITHUB_ENV"
+          fi
+
+      - name: Landscape, full screen, version number, signing
+        env:
+          APP_VERSION_CODE: ${{ github.run_number }}
+        run: node scripts/android-setup.mjs
+
+      - name: Copy game into Android project
+        run: npx cap sync android
+
+      - name: Build APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew $BUILD_TASK --no-daemon --stacktrace
+
+      - name: Name the APK
+        run: |
+          VERSION="$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')").${{ github.run_number }}"
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          APK=$(find android/app/build/outputs/apk -name "*.apk" | head -n 1)
+          echo "Found $APK"
+          cp "$APK" "HitMyBoss-v$VERSION.apk"
+
+      - name: Keep a copy in this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: HitMyBoss-v${{ env.APP_VERSION }}
+          path: HitMyBoss-v${{ env.APP_VERSION }}.apk
+
+      - name: Publish as a Release (easy download on your phone)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.APP_VERSION }}
+          name: HIT MY BOSS v${{ env.APP_VERSION }}
+          body: Install this APK on your Android phone. Each new version installs over the previous one.
+          files: HitMyBoss-v${{ env.APP_VERSION }}.apk
+          make_latest: true
